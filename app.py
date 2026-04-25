@@ -12,61 +12,68 @@ from langchain_groq import ChatGroq
 
 load_dotenv()
 
-# ------------------ DB INITIALIZATION ------------------
-# We use SQLite for deployment compatibility
-DB_PATH = "rag_test.db"
-if not os.path.exists(DB_PATH):
-    st.error(f"Error: {DB_PATH} not found. Please ensure the database file is in the repository.")
+# ------------------ LLMs ------------------
+llm1 = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    temperature=0,
+    google_api_key=os.getenv("GOOGLE_API_KEY")
+)
 
-def get_db():
-    if "db" not in st.session_state:
-        st.session_state.db = SQLDatabase.from_uri(f"sqlite:///{DB_PATH}")
-    return st.session_state.db
+llm2 = ChatGoogleGenerativeAI(
+    model="gemini-2.5-pro",
+    temperature=0,
+    google_api_key=os.getenv("GOOGLE_API_KEY")
+)
+
+llm3 = ChatOllama(model="llama3", temperature=0)
+
+llm4 = ChatGroq(
+    model="llama-3.1-8b-instant",
+    temperature=0,
+    api_key=os.getenv("GROQ_API_KEY")
+)
+
+# ------------------ UI ------------------
+def get_llminfo():
+    st.sidebar.header("Options", divider="rainbow")
+    model = st.sidebar.radio(
+        "Choose LLM:",
+        ("gemini-2.5-flash", "gemini-2.5-pro", "llama3", "groq")
+    )
+    return model
+
+# ------------------ DB ------------------
+def connectDatabase(username, port, host, password, database):
+    uri = f"mysql+mysqlconnector://{username}:{password}@{host}:{port}/{database}"
+    st.session_state.db = SQLDatabase.from_uri(uri)
 
 def getDatabaseSchema():
-    return get_db().get_table_info()
+    return st.session_state.db.get_table_info()
 
-# ------------------ LLM FACTORY ------------------
-def get_llm(model_name):
-    if model_name == "gemini-2.5-flash":
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            st.error("GOOGLE_API_KEY not found. Please set it in Streamlit Secrets.")
-            st.stop()
-        return ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0, google_api_key=api_key)
-    
-    elif model_name == "gemini-2.5-pro":
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            st.error("GOOGLE_API_KEY not found. Please set it in Streamlit Secrets.")
-            st.stop()
-        return ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0, google_api_key=api_key)
-    
-    elif model_name == "llama3":
-        return ChatOllama(model="llama3", temperature=0)
-    
-    elif model_name == "groq":
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            st.error("GROQ_API_KEY not found. Please set it in Streamlit Secrets.")
-            st.stop()
-        return ChatGroq(model="llama-3.1-8b-instant", temperature=0, api_key=api_key)
-
-# ------------------ CORE LOGIC ------------------
+# ------------------ SQL GENERATION ------------------
 def getQueryFromLLM(question, model):
+
     prompt = ChatPromptTemplate.from_template("""
-You are an expert SQL assistant. System: SQLite.
+You are an expert SQL assistant.
 
 Schema:
 {schema}
 
-Convert the user question into a valid SQLite query. Return ONLY the SQL code, no markdown blocks, no explanations.
+Convert the question into ONLY SQL query.
 
 Question: {question}
 SQL:
 """)
 
-    llm = get_llm(model)
+    if model == "gemini-2.5-flash":
+        llm = llm1
+    elif model == "gemini-2.5-pro":
+        llm = llm2
+    elif model == "llama3":
+        llm = llm3
+    else:
+        llm = llm4
+
     chain = prompt | llm | StrOutputParser()
 
     response = chain.invoke({
@@ -74,29 +81,39 @@ SQL:
         "schema": getDatabaseSchema()
     })
 
+    # clean SQL output
     return response.replace("```sql", "").replace("```", "").strip()
 
+# ------------------ RUN SQL ------------------
 def runQuery(query):
     try:
-        return get_db().run(query)
+        return st.session_state.db.run(query)
     except Exception as e:
         return f"SQL Error: {e}"
 
+# ------------------ NATURAL RESPONSE ------------------
 def getResponseForQueryResult(question, query, model, result):
-    prompt2 = ChatPromptTemplate.from_template("""
-You are a helpful data analyst.
 
+    prompt2 = ChatPromptTemplate.from_template("""
 Schema:
 {schema}
 
-User Question: {question}
-Generated SQL: {query}
-Database Result: {result}
+Question: {question}
+SQL: {query}
+Result: {result}
 
-Provide a concise, friendly explanation of the result in plain English.
+Explain the result in simple English.
 """)
 
-    llm = get_llm(model)
+    if model == "gemini-2.5-flash":
+        llm = llm1
+    elif model == "gemini-2.5-pro":
+        llm = llm2
+    elif model == "llama3":
+        llm = llm3
+    else:
+        llm = llm4
+
     chain2 = prompt2 | llm
 
     response = chain2.invoke({
@@ -109,70 +126,40 @@ Provide a concise, friendly explanation of the result in plain English.
     return response.content
 
 # ------------------ APP UI ------------------
-st.set_page_config(page_title="DataInsight SQL", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Text to SQL", page_icon="🧠", layout="centered")
+st.title("🧠 Ask Questions To Your MySQL Database")
 
-# Custom Styling
-st.markdown("""
-<style>
-    .main {
-        background-color: #0e1117;
-    }
-    .stChatMessage {
-        border-radius: 15px;
-    }
-</style>
-""", unsafe_allow_html=True)
+model = get_llminfo()
 
-st.title("📊 DataInsight: Natural Language to SQL")
-st.markdown("Ask questions about your music database (Tracks, Albums, Artists, etc.) in plain English.")
-
-# Sidebar
 with st.sidebar:
-    st.header("⚙️ Configuration")
-    model = st.radio(
-        "Select AI Model:",
-        ("gemini-2.5-flash", "gemini-2.5-pro", "groq"),
-        index=0
-    )
-    
-    st.divider()
-    st.info("Database: `Chinook (SQLite)`")
-    if st.button("View Schema Info"):
-        st.code(getDatabaseSchema())
+    st.header("Connect Database")
+    host = st.text_input("Host", "localhost")
+    port = st.text_input("Port", "3306")
+    user = st.text_input("Username", "root")
+    password = st.text_input("Password", type="password")
+    database = st.text_input("Database", "rag_test")
 
-# ------------------ CHAT INTERFACE ------------------
+    if st.button("Connect"):
+        connectDatabase(user, port, host, password, database)
+        st.success("Database Connected")
+
+# ------------------ CHAT ------------------
+question = st.chat_input("Ask your database...")
+
 if "chat" not in st.session_state:
     st.session_state.chat = []
 
+if question:
+    if "db" not in st.session_state:
+        st.error("Please connect database first")
+    else:
+        sql = getQueryFromLLM(question, model)
+        result = runQuery(sql)
+        answer = getResponseForQueryResult(question, sql, model, result)
+
+        st.session_state.chat.append(("user", question))
+        st.session_state.chat.append(("assistant", answer))
+
+# display chat
 for role, msg in st.session_state.chat:
     st.chat_message(role).markdown(msg)
-
-if question := st.chat_input("Ex: 'Who are the top 5 artists by number of tracks?'"):
-    # Display user message
-    st.chat_message("user").markdown(question)
-    st.session_state.chat.append(("user", question))
-
-    with st.spinner("Analyzing data..."):
-        try:
-            # 1. Generate SQL
-            sql_query = getQueryFromLLM(question, model)
-            
-            # 2. Run Query
-            query_result = runQuery(sql_query)
-            
-            # 3. Generate Natural Language Response
-            final_answer = getResponseForQueryResult(question, sql_query, model, query_result)
-            
-            # Display Assistant response
-            with st.chat_message("assistant"):
-                st.markdown(final_answer)
-                with st.expander("View Generated SQL"):
-                    st.code(sql_query, language="sql")
-                if "SQL Error" not in str(query_result):
-                    with st.expander("View Raw Data"):
-                        st.write(query_result)
-            
-            st.session_state.chat.append(("assistant", final_answer))
-            
-        except Exception as e:
-            st.error(f"Something went wrong: {e}")
