@@ -25,10 +25,23 @@ def get_llminfo():
 
 # ------------------ DB ------------------
 def connectDatabase(username, port, host, password, database):
-    uri = f"mysql+mysqlconnector://{username}:{password}@{host}:{port}/{database}"
-    st.session_state.db = SQLDatabase.from_uri(uri)
+    try:
+        # If running on Streamlit and user types 'localhost', 
+        # we connect to the bundled SQLite file instead to avoid errors.
+        if host == "localhost" or host == "":
+            st.info("Detected localhost on Streamlit. Connecting to internal 'rag_test.db' instead...")
+            uri = "sqlite:///rag_test.db"
+        else:
+            uri = f"mysql+mysqlconnector://{username}:{password}@{host}:{port}/{database}"
+        
+        st.session_state.db = SQLDatabase.from_uri(uri)
+        st.success("Connected Successfully!")
+    except Exception as e:
+        st.error(f"Database Error: {e}")
 
 def getDatabaseSchema():
+    if "db" not in st.session_state:
+         return "Database not connected"
     return st.session_state.db.get_table_info()
 
 def get_llm(model_name):
