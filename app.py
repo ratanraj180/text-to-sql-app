@@ -12,26 +12,7 @@ from langchain_groq import ChatGroq
 
 load_dotenv()
 
-# ------------------ LLMs ------------------
-llm1 = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    temperature=0,
-    google_api_key=os.getenv("GOOGLE_API_KEY")
-)
-
-llm2 = ChatGoogleGenerativeAI(
-    model="gemini-2.5-pro",
-    temperature=0,
-    google_api_key=os.getenv("GOOGLE_API_KEY")
-)
-
-llm3 = ChatOllama(model="llama3", temperature=0)
-
-llm4 = ChatGroq(
-    model="llama-3.1-8b-instant",
-    temperature=0,
-    api_key=os.getenv("GROQ_API_KEY")
-)
+# LLM instances will be created on-demand inside the get_llm() function
 
 # ------------------ UI ------------------
 def get_llminfo():
@@ -50,6 +31,28 @@ def connectDatabase(username, port, host, password, database):
 def getDatabaseSchema():
     return st.session_state.db.get_table_info()
 
+def get_llm(model_name):
+    if model_name == "gemini-2.5-flash":
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY not found in environment")
+        return ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, google_api_key=api_key)
+    
+    elif model_name == "gemini-2.5-pro":
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY not found in environment")
+        return ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0, google_api_key=api_key)
+    
+    elif model_name == "llama3":
+        return ChatOllama(model="llama3", temperature=0)
+    
+    elif model_name == "groq":
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise ValueError("GROQ_API_KEY not found in environment")
+        return ChatGroq(model="llama-3.1-8b-instant", temperature=0, api_key=api_key)
+
 # ------------------ SQL GENERATION ------------------
 def getQueryFromLLM(question, model):
 
@@ -65,14 +68,7 @@ Question: {question}
 SQL:
 """)
 
-    if model == "gemini-2.5-flash":
-        llm = llm1
-    elif model == "gemini-2.5-pro":
-        llm = llm2
-    elif model == "llama3":
-        llm = llm3
-    else:
-        llm = llm4
+    llm = get_llm(model)
 
     chain = prompt | llm | StrOutputParser()
 
@@ -105,14 +101,7 @@ Result: {result}
 Explain the result in simple English.
 """)
 
-    if model == "gemini-2.5-flash":
-        llm = llm1
-    elif model == "gemini-2.5-pro":
-        llm = llm2
-    elif model == "llama3":
-        llm = llm3
-    else:
-        llm = llm4
+    llm = get_llm(model)
 
     chain2 = prompt2 | llm
 
